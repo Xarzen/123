@@ -93,8 +93,27 @@ def admin_required(f):
     decorated_function.__name__ = f.__name__
     return decorated_function
 
-# 固定影片路徑配置
-VIDEO_PATH = "C:/Users/raymo/Documents/123/video/775119556.823492.mp4"
+# 影片和模型路徑配置 - 適應不同環境
+def get_file_path(filename, subfolder=''):
+    """獲取檔案路徑，支援本地和雲端環境"""
+    # 檢查是否在雲端環境 (Render)
+    if os.environ.get('RENDER'):
+        # 雲端環境路徑
+        base_path = '/opt/render/project/src'
+        if subfolder:
+            return os.path.join(base_path, subfolder, filename)
+        return os.path.join(base_path, filename)
+    else:
+        # 本地環境路徑
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(current_dir)
+        if subfolder:
+            return os.path.join(parent_dir, subfolder, filename)
+        return os.path.join(parent_dir, filename)
+
+# 配置檔案路徑
+VIDEO_PATH = get_file_path("775119556.823492.mp4", "video")
+MODEL_PATH = get_file_path("best.pt", "model")
 OUTPUT_FOLDER = 'output'
 
 app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
@@ -102,18 +121,20 @@ app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
 # 載入YOLO模型
 try:
     import torch
-    model = YOLO("C:/Users/raymo/Documents/123/model/best.pt")
+    model = YOLO(MODEL_PATH)
     
     # 檢查並使用GPU（如果可用）
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model.to(device)
     
     print(f"YOLO模型載入成功! 使用設備: {device}")
+    print(f"模型路徑: {MODEL_PATH}")
     if device == 'cuda':
         print(f"GPU: {torch.cuda.get_device_name(0)}")
         print(f"GPU記憶體: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
 except Exception as e:
     print(f"YOLO模型載入失敗: {e}")
+    print(f"嘗試載入的模型路徑: {MODEL_PATH}")
     model = None
     device = 'cpu'
 
