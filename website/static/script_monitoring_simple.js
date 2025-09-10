@@ -1,5 +1,6 @@
 let isUpdating = false;
 let updateTimeout = null;
+let emergencyCheckInterval = null;
 
 function startRealtimeMonitoring() {
     // 獲取選中的樓層
@@ -72,6 +73,11 @@ function startRealtimeMonitoring() {
             
             isUpdating = true;
             updateRealtimeFrame();
+            
+            // 啟動緊急狀況檢測（僅限暈倒偵測）
+            if (selectedDetectionType === 'fall') {
+                startEmergencyMonitoring();
+            }
         } else {
             showToast('error', '啟動失敗', data.message || data.error || '未知錯誤');
         }
@@ -91,6 +97,9 @@ function stopRealtimeMonitoring() {
         clearTimeout(updateTimeout);
         updateTimeout = null;
     }
+    
+    // 停止緊急狀況監控
+    stopEmergencyMonitoring();
     
     fetch('/stop_realtime', {
         method: 'POST'
@@ -148,13 +157,9 @@ function resetUI() {
     
     // 重置進度條
     const progressBar = document.getElementById('progressBar');
-    const percentageText = document.getElementById('percentageText');
     
     if (progressBar) {
         progressBar.style.width = '0%';
-    }
-    if (percentageText) {
-        percentageText.textContent = '0%';
     }
 }
 
@@ -194,30 +199,13 @@ function updateRealtimeFrame() {
                 // 更新進度條
                 const progress = parseFloat(data.progress) || 0;
                 const progressBar = document.getElementById('progressBar');
-                const percentageText = document.getElementById('percentageText');
                 
                 if (progressBar) {
                     progressBar.style.width = progress + '%';
                 }
-                if (percentageText) {
-                    percentageText.textContent = Math.round(progress) + '%';
-                }
                 
-                // 更新時間信息
-                const timeInfo = document.getElementById('timeInfo');
-                if (timeInfo && data.current_time && data.total_time) {
-                    timeInfo.textContent = `${data.current_time} / ${data.total_time}`;
-                } else if (timeInfo) {
-                    // 基於進度計算時間 (假設總時長約12.5秒)
-                    const totalSeconds = 12.5;
-                    const currentSeconds = (progress / 100) * totalSeconds;
-                    const formatTime = (seconds) => {
-                        const mins = Math.floor(seconds / 60);
-                        const secs = Math.floor(seconds % 60);
-                        return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-                    };
-                    timeInfo.textContent = `${formatTime(currentSeconds)} / ${formatTime(totalSeconds)}`;
-                }
+                // 檢查緊急狀況（來自實時幀數據）
+                checkFrameEmergency(data);
                 
                 // 檢查是否完成
                 if (progress >= 100) {
@@ -325,4 +313,64 @@ function showToast(type, title, message) {
             toast.remove();
         }
     }, 5000);
+}
+
+// 緊急狀況監控功能
+function startEmergencyMonitoring() {
+    console.log('啟動緊急狀況監控');
+    
+    // 清除現有的監控間隔
+    if (emergencyCheckInterval) {
+        clearInterval(emergencyCheckInterval);
+    }
+    
+    // 每2秒檢查一次緊急狀況
+    emergencyCheckInterval = setInterval(checkEmergencyStatus, 2000);
+}
+
+function stopEmergencyMonitoring() {
+    console.log('停止緊急狀況監控');
+    
+    if (emergencyCheckInterval) {
+        clearInterval(emergencyCheckInterval);
+        emergencyCheckInterval = null;
+    }
+    
+    // 停止所有警報
+    if (window.emergencyAlertSystem) {
+        window.emergencyAlertSystem.stopAllAlerts();
+    }
+}
+
+function checkEmergencyStatus() {
+    fetch('/check_emergency')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.emergency_detected) {
+                console.log('檢測到緊急狀況:', data.emergency_info);
+                
+                // 觸發緊急警報
+                if (window.emergencyAlertSystem) {
+                    window.emergencyAlertSystem.triggerEmergencyAlert(data.emergency_info);
+                } else {
+                    console.error('緊急警報系統未初始化');
+                    // 備用警報方法
+                    alert(`🚨 緊急警報 🚨\n${data.emergency_info.floor} 發生緊急狀況\n${data.emergency_info.message}\n請立即處理！`);
+                }
+            }
+        })
+        .catch(error => {
+            console.error('檢查緊急狀況時發生錯誤:', error);
+        });
+}
+
+// 在實時幀更新中也檢查緊急狀況
+function checkFrameEmergency(data) {
+    if (data.emergency_detected && data.emergency_info) {
+        console.log('從實時幀中檢測到緊急狀況:', data.emergency_info);
+        
+        if (window.emergencyAlertSystem) {
+            window.emergencyAlertSystem.triggerEmergencyAlert(data.emergency_info);
+        }
+    }
 }

@@ -22,8 +22,6 @@ class EventsApp {
         // Filter elements
         this.dataSource = document.getElementById('dataSource');
         this.objectFilter = document.getElementById('objectFilter');
-        this.confidenceFilter = document.getElementById('confidenceFilter');
-        this.confidenceValue = document.getElementById('confidenceValue');
         
         // Table elements
         this.loadingEvents = document.getElementById('loadingEvents');
@@ -50,13 +48,6 @@ class EventsApp {
         
         if (this.objectFilter) {
             this.objectFilter.addEventListener('change', () => this.applyFilters());
-        }
-        
-        if (this.confidenceFilter) {
-            this.confidenceFilter.addEventListener('input', (e) => {
-                this.confidenceValue.textContent = `${e.target.value}%`;
-                this.applyFilters();
-            });
         }
     }
 
@@ -178,12 +169,10 @@ class EventsApp {
 
     applyFilters() {
         const selectedObject = this.objectFilter.value;
-        const minConfidence = parseInt(this.confidenceFilter.value) / 100;
         
         this.filteredEvents = this.events.filter(event => {
             const objectMatch = selectedObject === 'all' || event.object === selectedObject;
-            const confidenceMatch = event.confidence >= minConfidence;
-            return objectMatch && confidenceMatch;
+            return objectMatch;
         });
         
         this.displayEvents();
@@ -196,7 +185,7 @@ class EventsApp {
         if (this.filteredEvents.length === 0) {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td colspan="6" class="no-filtered-events">
+                <td colspan="3" class="no-filtered-events">
                     <i class="fas fa-filter"></i>
                     沒有符合篩選條件的事件
                 </td>
@@ -214,18 +203,10 @@ class EventsApp {
             const row = document.createElement('tr');
             row.className = 'event-row';
             
-            const confidenceValue = parseFloat(event.confidence);
-            const confidenceClass = this.getConfidenceClass(confidenceValue);
-            
             row.innerHTML = `
                 <td class="event-time">${event.time}</td>
                 <td class="object-type">
                     <span class="object-badge">${event.object}</span>
-                </td>
-                <td class="confidence-value">
-                    <span class="confidence-badge ${confidenceClass}">
-                        ${(confidenceValue * 100).toFixed(1)}%
-                    </span>
                 </td>
                 <td class="floor-info">
                     <span class="floor-badge">${event.floor || '1F'}</span>
@@ -234,12 +215,6 @@ class EventsApp {
             
             this.eventsTableBody.appendChild(row);
         });
-    }
-
-    getConfidenceClass(confidence) {
-        if (confidence >= 0.8) return 'high-confidence';
-        if (confidence >= 0.6) return 'medium-confidence';
-        return 'low-confidence';
     }
 
     formatTime(seconds) {

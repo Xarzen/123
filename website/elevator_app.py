@@ -1,9 +1,10 @@
+# -*- coding: utf-8 -*-
 from flask import Flask, render_template, jsonify, send_file, request, redirect, url_for, session, flash
 import os
 import cv2
 import base64
 from ultralytics import YOLO
-import datetime
+from datetime import datetime
 import json
 import threading
 import time
@@ -63,7 +64,7 @@ try:
             'password': hashlib.sha256('admin123'.encode()).hexdigest(),
             'role': 'administrator',
             'name': '系統管理員',
-            'created_at': datetime.datetime.now()
+            'created_at': datetime.now()
         }
         users_collection.insert_one(admin_data)
         print("已創建預設管理員帳號: admin/admin123")
@@ -76,7 +77,7 @@ try:
             'password': hashlib.sha256('op123'.encode()).hexdigest(),
             'role': 'operator',
             'name': '監控操作員',
-            'created_at': datetime.datetime.now()
+            'created_at': datetime.now()
         }
         users_collection.insert_one(operator_data)
         print("已創建預設操作員帳號: operator/op123")
@@ -89,7 +90,7 @@ try:
             'password': hashlib.sha256('view123'.encode()).hexdigest(),
             'role': 'viewer',
             'name': '監控觀察員',
-            'created_at': datetime.datetime.now()
+            'created_at': datetime.now()
         }
         users_collection.insert_one(viewer_data)
         print("已創建預設觀察員帳號: viewer/view123")
@@ -186,7 +187,7 @@ def save_event_to_db(event_data):
     
     try:
         # 加入時間戳記
-        event_data['created_at'] = datetime.datetime.now()
+        event_data['created_at'] = datetime.now()
         result = events_collection.insert_one(event_data)
         return result.inserted_id is not None
     except Exception as e:
@@ -238,8 +239,14 @@ EMT_VIDEO_PATH = "C:/Users/raymo/Documents/123/video/emtvideo.mp4"
 EMT_MODEL_PATH = "C:/Users/raymo/Documents/123/model/emt.pt"
 
 # 暈倒偵測配置
-FALL_VIDEO_PATH = "C:/Users/raymo/Documents/123/video/fallvideo.mp4"
+FALL_VIDEO_PATH = "C:/Users/raymo/Documents/123/video/1.mp4"
 FALL_MODEL_PATH = "C:/Users/raymo/Documents/123/model/fall.pt"
+FALL_CLASSIFIER_PATH = "C:/Users/raymo/Documents/123/model/MyMobileNetV2_best.h5"
+
+# 滿員偵測配置
+CAPACITY_FULL_VIDEO_PATH = "C:/Users/raymo/Documents/123/video/全滿.mp4"
+CAPACITY_HALF_VIDEO_PATH = "C:/Users/raymo/Documents/123/video/半滿.mp4"
+CAPACITY_MODEL_PATH = "C:/Users/raymo/Documents/123/model/yolov8s.pt"
 
 OUTPUT_FOLDER = 'output'
 
@@ -262,41 +269,58 @@ except Exception as e:
     pose_model = None
     MEDIAPIPE_AVAILABLE = False
 
-# 載入YOLO模型
+# 載入YOLO模型和分類模型
 try:
     import torch
+    from tensorflow.keras.models import load_model
+    
     # 載入EMT偵測模型
     emt_model = YOLO(EMT_MODEL_PATH)
     
-    # 載入暈倒偵測模型
+    # 載入暈倒偵測模型（YOLO用於人體檢測）
     fall_model = YOLO(FALL_MODEL_PATH)
+    
+    # 載入滿員偵測模型（YOLO用於物體檢測）
+    capacity_model = YOLO(CAPACITY_MODEL_PATH)
+    
+    # 載入姿態分類模型（TensorFlow用於姿態分類）
+    fall_classifier = load_model(FALL_CLASSIFIER_PATH)
     
     # 檢查並使用GPU（如果可用）
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     emt_model.to(device)
     fall_model.to(device)
+    capacity_model.to(device)
     
     print(f"YOLO模型載入成功! 使用設備: {device}")
     print(f"EMT模型: {EMT_MODEL_PATH}")
     print(f"暈倒偵測模型: {FALL_MODEL_PATH}")
+    print(f"滿員偵測模型: {CAPACITY_MODEL_PATH}")
+    print(f"姿態分類模型: {FALL_CLASSIFIER_PATH}")
     if device == 'cuda':
         print(f"GPU: {torch.cuda.get_device_name(0)}")
         print(f"GPU記憶體: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
 except Exception as e:
-    print(f"YOLO模型載入失敗: {e}")
+    print(f"模型載入失敗: {e}")
     emt_model = None
     fall_model = None
+    fall_classifier = None
+    capacity_model = None
     device = 'cpu'
 
 # 檢查影片檔案是否存在
 emt_video_exists = os.path.exists(EMT_VIDEO_PATH)
 fall_video_exists = os.path.exists(FALL_VIDEO_PATH)
+capacity_full_video_exists = os.path.exists(CAPACITY_FULL_VIDEO_PATH)
+capacity_half_video_exists = os.path.exists(CAPACITY_HALF_VIDEO_PATH)
 
 print(f"EMT影片檔案: {EMT_VIDEO_PATH} - {'存在' if emt_video_exists else '不存在'}")
 print(f"暈倒偵測影片檔案: {FALL_VIDEO_PATH} - {'存在' if fall_video_exists else '不存在'}")
+print(f"滿員偵測(全滿)影片檔案: {CAPACITY_FULL_VIDEO_PATH} - {'存在' if capacity_full_video_exists else '不存在'}")
+print(f"滿員偵測(半滿)影片檔案: {CAPACITY_HALF_VIDEO_PATH} - {'存在' if capacity_half_video_exists else '不存在'}")
 
 # 至少要有一個影片檔案存在
-video_exists = emt_video_exists or fall_video_exists
+video_exists = emt_video_exists or fall_video_exists or capacity_full_video_exists or capacity_half_video_exists
 
 # ==================== 暈倒偵測相關函數 ==================== #
 
@@ -326,8 +350,22 @@ def classify_posture(shoulder, hip, knee, height_threshold=40):
     else:
         return "Standing"
 
+# 新的暈倒偵測函數 (基於 ele.py)
+def resize_with_padding(img, size=(224,224)):
+    """調整圖片大小並添加填充"""
+    h, w = img.shape[:2]
+    scale = min(size[0]/h, size[1]/w)
+    nh, nw = int(h*scale), int(w*scale)
+    resized = cv2.resize(img, (nw, nh))
+    top = (size[0]-nh)//2
+    bottom = size[0]-nh-top
+    left = (size[1]-nw)//2
+    right = size[1]-nw-left
+    padded = cv2.copyMakeBorder(resized, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(0,0,0))
+    return padded
+
 def detect_people_for_fall(frame):
-    """使用YOLO檢測人體（用於暈倒偵測）"""
+    """使用YOLO檢測人體（新版本）"""
     if fall_model is None:
         return []
     
@@ -335,11 +373,41 @@ def detect_people_for_fall(frame):
     persons = []
     for r in results:
         for box in r.boxes:
-            cls = int(box.cls[0])
-            if cls == 0:  # person class
+            if int(box.cls[0]) == 0:  # 只保留人
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
                 persons.append((x1, y1, x2, y2))
     return persons
+
+def classify_posture_batch(rois, classifier_model, img_size=(224,224)):
+    """批量分類姿態"""
+    if classifier_model is None:
+        return [], []
+    
+    try:
+        import numpy as np
+        imgs = np.array([resize_with_padding(roi, img_size)/255.0 for roi in rois])
+        preds = classifier_model.predict(imgs, verbose=0)  # shape: (N,2)
+        labels = []
+        is_lying_list = []
+        
+        for pred in preds:
+            lying_prob = pred[1]*100
+            if lying_prob < 40:
+                is_lying = True
+                label_text = f"Lying: {lying_prob:.1f}%"
+            else:
+                is_lying = False
+                label_text = f"Standing: {lying_prob:.1f}%"
+            labels.append(label_text)
+            is_lying_list.append(is_lying)
+        return labels, is_lying_list
+    except Exception as e:
+        print(f"姿態分類錯誤: {e}")
+        return [], []
+
+def check_emergency_fall(is_lying_list):
+    """檢查是否有緊急狀況（新版本）"""
+    return any(is_lying_list)
 
 def detect_pose(frame, pose_model):
     """使用MediaPipe檢測人體姿態"""
@@ -365,6 +433,102 @@ def check_emergency_status(postures):
 
 # ==================== 結束暈倒偵測函數 ==================== #
 
+# ==================== 滿員偵測相關函數 ==================== #
+
+def calculate_union_area(boxes, height, width):
+    """計算所有偵測框的聯集面積"""
+    if len(boxes) == 0:
+        return 0
+    
+    # 創建一個與圖片相同大小的空白圖像
+    union_mask = np.zeros((height, width), dtype=np.uint8)
+    
+    # 遍歷每個框框，將其區域標記為1
+    for box in boxes:
+        x1, y1, x2, y2 = map(int, box[:4])  # 只取前4個座標值
+        # 確保座標在合理範圍內
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(width, x2), min(height, y2)
+        if x2 > x1 and y2 > y1:  # 確保是有效的框
+            union_mask[y1:y2, x1:x2] = 1
+    
+    # 計算聯集面積（所有被標記為1的區域）
+    union_area = np.sum(union_mask)
+    return union_area
+
+def detect_capacity_status(frame, model, threshold=0.5):
+    """
+    使用YOLO模型偵測滿員狀態
+    返回: (area_ratio, is_full, detection_count)
+    """
+    try:
+        # 進行YOLO偵測 (只偵測人 - class 0)
+        results = model(frame, device=device, verbose=False)
+        
+        if results and len(results) > 0 and results[0].boxes is not None:
+            boxes = results[0].boxes.xyxy.cpu().numpy()
+            confidences = results[0].boxes.conf.cpu().numpy()
+            classes = results[0].boxes.cls.cpu().numpy()
+            
+            # 只保留人的偵測結果 (class 0) 且信心度 > 0.3
+            person_boxes = []
+            for i, (box, conf, cls) in enumerate(zip(boxes, confidences, classes)):
+                if cls == 0 and conf > 0.3:  # class 0 是人
+                    person_boxes.append(box)
+            
+            height, width = frame.shape[:2]
+            
+            # 計算人員聯集面積
+            union_area = calculate_union_area(person_boxes, height, width)
+            frame_area = width * height
+            area_ratio = union_area / frame_area
+            
+            # 判斷是否滿員
+            is_full = area_ratio >= threshold
+            
+            return area_ratio, is_full, len(person_boxes), person_boxes
+        else:
+            return 0.0, False, 0, []
+            
+    except Exception as e:
+        print(f"滿員偵測錯誤: {e}")
+        return 0.0, False, 0, []
+
+def draw_capacity_detection(frame, area_ratio, is_full, person_count, boxes, detection_type):
+    """在畫面上繪製滿員偵測結果"""
+    height, width = frame.shape[:2]
+    
+    # 設定顏色 (滿員時紅色，否則綠色)
+    color = (0, 0, 255) if is_full else (0, 255, 0)
+    
+    # 繪製人員偵測框
+    for box in boxes:
+        x1, y1, x2, y2 = map(int, box[:4])
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+    
+    # 顯示狀態資訊（使用英文避免編碼問題）
+    if detection_type == 'capacity_full':
+        title = "Capacity Detection (Full)"
+    else:
+        title = "Capacity Detection (Half)"
+    
+    status_text = "FULL" if is_full else "NORMAL"
+    
+    # 背景框
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (10, 10), (width-10, 120), (0, 0, 0), -1)
+    frame = cv2.addWeighted(frame, 0.7, overlay, 0.3, 0)
+    
+    # 文字資訊（使用英文避免編碼問題）
+    cv2.putText(frame, title, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+    cv2.putText(frame, f"Person Count: {person_count}", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    cv2.putText(frame, f"Area Ratio: {area_ratio:.1%}", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    cv2.putText(frame, f"Status: {status_text}", (300, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+    
+    return frame
+
+# ==================== 結束滿員偵測函數 ==================== #
+
 class VideoProcessor:
     def __init__(self, detection_type='emt'):
         self.processing = False
@@ -377,7 +541,7 @@ class VideoProcessor:
         self.last_record_time = {}  # 記錄每個物件最後一次記錄的時間戳
         self.record_interval = 3.0  # 記錄間隔（秒）
         self.current_floor = '1F'  # 當前樓層，默認為1F
-        self.detection_type = detection_type  # 偵測類型：'emt' 或 'fall'
+        self.detection_type = detection_type  # 偵測類型：'emt', 'fall', 'capacity_full', 'capacity_half'
         
         # 實時播放參數
         self.realtime_mode = True  # 實時播放模式
@@ -402,6 +566,14 @@ class VideoProcessor:
                 video_path = FALL_VIDEO_PATH
                 if not fall_video_exists:
                     raise Exception("暈倒偵測影片檔案不存在")
+            elif self.detection_type == 'capacity_full':
+                video_path = CAPACITY_FULL_VIDEO_PATH
+                if not capacity_full_video_exists:
+                    raise Exception("滿員偵測(全滿)影片檔案不存在")
+            elif self.detection_type == 'capacity_half':
+                video_path = CAPACITY_HALF_VIDEO_PATH
+                if not capacity_half_video_exists:
+                    raise Exception("滿員偵測(半滿)影片檔案不存在")
             else:  # default to emt
                 video_path = EMT_VIDEO_PATH
                 if not emt_video_exists:
@@ -486,6 +658,9 @@ class VideoProcessor:
                 if self.detection_type == 'fall':
                     # 暈倒偵測
                     frame = self.process_fall_detection(frame)
+                elif self.detection_type in ['capacity_full', 'capacity_half']:
+                    # 滿員偵測
+                    frame = self.process_capacity_detection(frame)
                 else:
                     # EMT偵測
                     frame = self.process_emt_detection(frame)
@@ -533,7 +708,7 @@ class VideoProcessor:
                             if should_record:
                                 self.last_record_time[unified_label] = current_time
                                 event = {
-                                    'time': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                    'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                                     'object': unified_label,
                                     'confidence': f"{conf:.2f}",
                                     'floor': getattr(self, 'current_floor', '1F'),
@@ -553,120 +728,158 @@ class VideoProcessor:
         return frame
     
     def process_fall_detection(self, frame):
-        """處理暈倒偵測"""
-        if not MEDIAPIPE_AVAILABLE:
-            # MediaPipe 不可用時的回退處理
-            cv2.putText(frame, "Fall Detection: MediaPipe not available", (10, 30), 
+        """處理暱倒偵測（新版本 - 使用TensorFlow分類器）"""
+        if fall_model is None or fall_classifier is None:
+            cv2.putText(frame, "Fall Detection: Models not available", (10, 30), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            cv2.putText(frame, "Using basic YOLO detection only", (10, 60), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            
-            # 基本的 YOLO 人體檢測
-            if fall_model and frame is not None:
-                current_time = self.current_frame_num / self.original_fps
-                results = fall_model(frame, device=device, verbose=False)
-                
-                # 處理檢測結果
-                for result in results:
-                    if hasattr(result, 'boxes') and result.boxes is not None:
-                        for box in result.boxes:
-                            conf = box.conf[0].item()
-                            if conf >= 0.6:
-                                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                                label = result.names[int(box.cls[0])]
-                                
-                                # 繪製檢測框
-                                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                                cv2.putText(frame, f"{label} {conf:.2f}", (x1, y1 - 10),
-                                          cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             return frame
         
-        # MediaPipe 可用時的完整處理
-        if fall_model and pose_model and frame is not None:
+        try:
             current_time = self.current_frame_num / self.original_fps
             
-            # 檢測人體
+            # 使用YOLO檢測人體
             persons = detect_people_for_fall(frame)
-            frame_postures = []
             
-            for idx, (x1, y1, x2, y2) in enumerate(persons):
-                person_roi = frame[y1:y2, x1:x2]
-                if person_roi.size == 0:
-                    continue
+            if persons:
+                # 提取人體區域
+                rois = []
+                valid_persons = []
+                for (x1, y1, x2, y2) in persons:
+                    roi = frame[y1:y2, x1:x2]
+                    if roi.size > 0:
+                        rois.append(roi)
+                        valid_persons.append((x1, y1, x2, y2))
                 
-                landmarks, results = detect_pose(person_roi, pose_model)
-                warning_messages = []
-                color = (0, 255, 0)  # 預設綠色
-                
-                if landmarks:
-                    # 取得關鍵點
-                    shoulder = (landmarks.landmark[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER].x * person_roi.shape[1],
-                               landmarks.landmark[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER].y * person_roi.shape[0])
-                    hip = (landmarks.landmark[mp.solutions.pose.PoseLandmark.LEFT_HIP].x * person_roi.shape[1],
-                          landmarks.landmark[mp.solutions.pose.PoseLandmark.LEFT_HIP].y * person_roi.shape[0])
-                    knee = (landmarks.landmark[mp.solutions.pose.PoseLandmark.LEFT_KNEE].x * person_roi.shape[1],
-                           landmarks.landmark[mp.solutions.pose.PoseLandmark.LEFT_KNEE].y * person_roi.shape[0])
+                if rois:
+                    # 批量分類姿態
+                    labels, is_lying_list = classify_posture_batch(rois, fall_classifier)
                     
-                    angle = calculate_joint_angle(shoulder, hip, knee)
-                    posture = classify_posture(shoulder, hip, knee)
-                    
-                    # 設定顏色和訊息
-                    if posture == "Lying Down":
-                        warning_messages.append(f"躺下! 角度: {angle:.2f}")
-                        color = (0, 0, 255)  # 紅色 - 高風險
-                    elif posture == "Sitting":
-                        warning_messages.append(f"坐著! 角度: {angle:.2f}")
-                        color = (0, 165, 255)  # 橙色 - 中風險
-                    elif posture == "Standing":
-                        warning_messages.append(f"站立! 角度: {angle:.2f}")
-                        color = (0, 255, 0)  # 綠色 - 正常
-                    
-                    frame_postures.append(posture)
-                    
-                    # 記錄緊急事件
-                    if posture in ["Lying Down", "Sitting"]:
-                        should_record = False
-                        event_key = f"Person_{idx}_{posture}"
+                    # 檢查緊急狀況並記錄每個人的狀態
+                    lying_persons = []
+                    for idx, ((x1, y1, x2, y2), label_text, is_lying) in enumerate(zip(valid_persons, labels, is_lying_list)):
+                        color = (0, 0, 255) if is_lying else (0, 255, 0)  # 紅框 Lying，綠框 Standing
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                        cv2.putText(frame, label_text, (x1, y1-10),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
                         
+                        # 記錄躺下的人員
+                        if is_lying:
+                            lying_persons.append({
+                                'person_id': idx + 1,
+                                'position': (x1, y1, x2, y2),
+                                'confidence': label_text,
+                                'area': (x2-x1) * (y2-y1)
+                            })
+                    
+                    # 如果檢測到躺下的人員，記錄事件
+                    if lying_persons:
+                        cv2.putText(frame, "⚠️ EMERGENCY DETECTED!", (10, 60), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+                        
+                        # 檢查是否需要記錄新事件（防止重複記錄）
+                        should_record = False
+                        event_key = "[緊急狀況]"  # 使用統一的key
+                        real_time = time.time()  # 使用實際時間戳
+                        
+                        if not hasattr(self, 'last_record_time'):
+                            self.last_record_time = {}
+                            
                         if event_key not in self.last_record_time:
                             should_record = True
-                        elif current_time - self.last_record_time[event_key] >= self.record_interval:
+                            self.last_record_time[event_key] = real_time
+                        elif real_time - self.last_record_time[event_key] >= 3.0:  # 3秒間隔，與EMT一致
                             should_record = True
+                            self.last_record_time[event_key] = real_time
                         
                         if should_record:
-                            self.last_record_time[event_key] = current_time
-                            event = {
-                                'time': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                                'object': f"人員{idx+1}_{posture}",
-                                'confidence': f"{angle:.2f}°",
+                            # 記錄緊急狀況事件（簡化版）
+                            event_data = {
+                                'type': 'emergency_fall',
+                                'timestamp': datetime.now().isoformat(),
+                                'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                'object': '[緊急狀況]',
+                                'confidence': '緊急警報',
                                 'floor': getattr(self, 'current_floor', '1F'),
                                 'frame_number': self.current_frame_num,
-                                'video_timestamp': current_time
+                                'time_in_video': current_time,
+                                'video_timestamp': current_time,
+                                'severity': 'high',
+                                'details': '發生緊急狀況 請及時處理',
+                                'event_source': 'new_fall_detection_system'
                             }
-                            # 儲存到記憶體和資料庫
-                            self.events.append(event)
-                            save_event_to_db(event.copy())
-                            print(f"*** [暈倒偵測] 新增事件記錄: {event['object']} (角度: {angle:.2f}°) 樓層: {event['floor']} 在時間 {event['time']} ***")
-                    
-                    # 繪製姿態連線 (如果可用)
-                    if MEDIAPIPE_AVAILABLE and hasattr(mp.solutions, 'drawing_utils'):
-                        mp.solutions.drawing_utils.draw_landmarks(frame[y1:y2, x1:x2], results.pose_landmarks, mp.solutions.pose.POSE_CONNECTIONS)
-                
-                # 繪製檢測框和文字
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                for i, msg in enumerate(warning_messages):
-                    cv2.putText(frame, f"Person {idx+1}: {msg}", (x1, y1 - 10 - (i * 20)),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                            
+                            # 添加到記憶體事件列表
+                            self.events.append(event_data)
+                            
+                            # 保存到資料庫
+                            try:
+                                save_result = save_event_to_db(event_data.copy())
+                                if save_result:
+                                    print(f"*** [緊急警報] 新增事件記錄: {event_data['object']} 樓層: {event_data['floor']} 在時間 {event_data['time']} ***")
+                                else:
+                                    print(f"資料庫儲存失敗: {event_data['object']}")
+                            except Exception as e:
+                                print(f"Database save error: {e}")
             
-            # 檢查整體緊急狀態
-            emergency_flag = check_emergency_status(frame_postures)
-            if emergency_flag > 0:
-                status_text = "高風險!" if emergency_flag == 2 else "中風險!"
-                cv2.putText(frame, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            # 顯示統計信息
+            cv2.putText(frame, f"Fall Detection Active - Frame: {self.current_frame_num}", 
+                       (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                       
+        except Exception as e:
+            print(f"Fall detection error: {e}")
+            cv2.putText(frame, f"Fall Detection Error: {str(e)[:50]}", (10, 30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
         
         return frame
     
-
+    def process_capacity_detection(self, frame):
+        """處理滿員偵測"""
+        if capacity_model is None:
+            cv2.putText(frame, "Capacity Detection: Model not available", (10, 30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            return frame
+        
+        try:
+            # 設定滿員閾值（根據偵測類型調整）
+            if self.detection_type == 'capacity_full':
+                threshold = 0.4  # 全滿情境40%就算滿員
+            else:  # capacity_half
+                threshold = 0.4  # 半滿情境40%就算滿員
+            
+            # 執行滿員偵測
+            area_ratio, is_full, person_count, boxes = detect_capacity_status(frame, capacity_model, threshold)
+            
+            # 繪製偵測結果
+            frame = draw_capacity_detection(frame, area_ratio, is_full, person_count, boxes, self.detection_type)
+            
+            # 記錄滿員事件（只在控制台輸出，不記錄到資料庫）
+            if is_full:
+                real_time = time.time()
+                event_key = f"[滿員狀況_{self.detection_type}]"
+                
+                should_record = False
+                if not hasattr(self, 'last_record_time'):
+                    self.last_record_time = {}
+                    
+                if event_key not in self.last_record_time:
+                    should_record = True
+                    self.last_record_time[event_key] = real_time
+                elif real_time - self.last_record_time[event_key] >= 3.0:  # 3秒間隔
+                    should_record = True
+                    self.last_record_time[event_key] = real_time
+                
+                if should_record:
+                    current_time = self.current_frame_num / self.original_fps
+                    
+                    # 只在控制台輸出警報訊息，不儲存到資料庫或事件列表
+                    print(f"*** [滿員警報] {event_key} 樓層: {getattr(self, 'current_floor', '1F')} 在時間 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 面積比例: {area_ratio:.1%} 人員數量: {person_count}人 ***")
+                       
+        except Exception as e:
+            print(f"Capacity detection error: {e}")
+            cv2.putText(frame, f"Capacity Detection Error: {str(e)[:50]}", (10, 30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        
+        return frame
     
     def start_realtime_analysis(self):
         """開始實時分析"""
@@ -747,6 +960,14 @@ class VideoProcessor:
                 video_path = FALL_VIDEO_PATH
                 if not fall_video_exists:
                     raise Exception("暈倒偵測影片檔案不存在")
+            elif self.detection_type == 'capacity_full':
+                video_path = CAPACITY_FULL_VIDEO_PATH
+                if not capacity_full_video_exists:
+                    raise Exception("滿員偵測(全滿)影片檔案不存在")
+            elif self.detection_type == 'capacity_half':
+                video_path = CAPACITY_HALF_VIDEO_PATH
+                if not capacity_half_video_exists:
+                    raise Exception("滿員偵測(半滿)影片檔案不存在")
             else:
                 video_path = EMT_VIDEO_PATH
                 if not emt_video_exists:
@@ -761,7 +982,7 @@ class VideoProcessor:
             
             # 準備輸出影片（使用更好的編碼器和目標FPS）
             fourcc = cv2.VideoWriter_fourcc(*'H264')  # 使用H264編碼器
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_filename = f'processed_{timestamp}.mp4'
             self.output_path = os.path.join(OUTPUT_FOLDER, output_filename)
             
@@ -836,6 +1057,8 @@ class VideoProcessor:
             # 批量YOLO檢測 - 根據偵測類型使用不同模型
             if self.detection_type == 'fall':
                 results_batch = fall_model(frames_only, device=device, verbose=False) if fall_model else []
+            elif self.detection_type in ['capacity_full', 'capacity_half']:
+                results_batch = capacity_model(frames_only, device=device, verbose=False) if capacity_model else []
             else:
                 results_batch = emt_model(frames_only, device=device, verbose=False) if emt_model else []
             
@@ -866,7 +1089,7 @@ class VideoProcessor:
                                 if should_record:
                                     self.last_record_time[unified_label] = current_time
                                     event = {
-                                        'time': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                        'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                                         'object': unified_label,
                                         'confidence': f"{conf:.2f}",
                                         'floor': getattr(self, 'current_floor', '1F'),  # 添加樓層信息
@@ -1085,6 +1308,41 @@ def get_realtime_frame():
             'progress': 100
         })
     
+    # 檢查是否有緊急狀況
+    emergency_detected = False
+    emergency_info = {}
+    
+    # 檢查最近的事件是否有緊急狀況
+    if len(video_processor.events) > 0:
+        latest_event = video_processor.events[-1]
+        # 檢查最新事件是否為緊急狀況且在最近5秒內
+        current_time = datetime.now()
+        if isinstance(latest_event.get('timestamp'), str):
+            try:
+                # 嘗試解析 ISO 格式
+                timestamp_str = latest_event['timestamp']
+                if 'T' in timestamp_str:
+                    # ISO 格式：2025-09-05T16:41:48.075388
+                    event_time = datetime.fromisoformat(timestamp_str.replace('T', ' ').split('.')[0])
+                else:
+                    # 標準格式：2025-09-05 16:41:48
+                    event_time = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
+            except:
+                event_time = current_time
+        else:
+            event_time = latest_event.get('timestamp', current_time)
+        
+        time_diff = (current_time - event_time).total_seconds()
+        
+        if latest_event.get('object') == '[緊急狀況]' and time_diff <= 3:
+            emergency_detected = True
+            emergency_info = {
+                'message': latest_event.get('details', '發生緊急狀況'),
+                'floor': latest_event.get('floor', '未知'),
+                'timestamp': latest_event.get('timestamp'),
+                'persons_count': len(latest_event.get('persons_detected', []))
+            }
+    
     print(f"成功獲取幀數據，進度: {video_processor.progress}%")
     return jsonify({
         'success': True,
@@ -1094,8 +1352,62 @@ def get_realtime_frame():
         'total_frames': video_processor.frame_count,
         'fps': video_processor.original_fps,
         'processing': video_processor.is_processing,
-        'completed': False
+        'completed': False,
+        'emergency_detected': emergency_detected,
+        'emergency_info': emergency_info
     })
+
+@app.route('/check_emergency')
+@login_required
+def check_emergency():
+    """檢查是否有緊急狀況"""
+    try:
+        # 檢查最近的事件是否有緊急狀況
+        emergency_detected = False
+        emergency_info = {}
+        
+        if len(video_processor.events) > 0:
+            latest_event = video_processor.events[-1]
+            # 檢查最新事件是否為緊急狀況且在最近5秒內
+            current_time = datetime.now()
+            if isinstance(latest_event.get('timestamp'), str):
+                try:
+                    # 嘗試解析 ISO 格式
+                    timestamp_str = latest_event['timestamp']
+                    if 'T' in timestamp_str:
+                        # ISO 格式：2025-09-05T16:41:48.075388
+                        event_time = datetime.fromisoformat(timestamp_str.replace('T', ' ').split('.')[0])
+                    else:
+                        # 標準格式：2025-09-05 16:41:48
+                        event_time = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
+                except:
+                    event_time = current_time
+            else:
+                event_time = latest_event.get('timestamp', current_time)
+            
+            time_diff = (current_time - event_time).total_seconds()
+            
+            if latest_event.get('object') == '[緊急狀況]' and time_diff <= 5:
+                emergency_detected = True
+                emergency_info = {
+                    'message': latest_event.get('details', '發生緊急狀況 請及時處理'),
+                    'floor': latest_event.get('floor', '未知'),
+                    'timestamp': latest_event.get('timestamp'),
+                    'persons_count': len(latest_event.get('persons_detected', []))
+                }
+        
+        return jsonify({
+            'success': True,
+            'emergency_detected': emergency_detected,
+            'emergency_info': emergency_info
+        })
+    
+    except Exception as e:
+        print(f"檢查緊急狀況時發生錯誤: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 @app.route('/progress')
 @login_required

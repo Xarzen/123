@@ -409,6 +409,12 @@ body {
     border-radius: 8px;
     font-size: 0.9rem;
     background: #2d3748;
+    color: #ffffff;
+}
+
+.filter-group select option {
+    background: #2d3748;
+    color: #ffffff;
 }
 
 .filter-group input[type="range"] {

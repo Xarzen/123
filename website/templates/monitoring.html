@@ -101,6 +101,8 @@
                         <select id="detection-type-select" class="detection-type-select">
                             <option value="emt" selected>EMT 緊急醫療偵測</option>
                             <option value="fall">暈倒偵測</option>
+                            <option value="capacity_full">滿員偵測 (全滿)</option>
+                            <option value="capacity_half">滿員偵測 (半滿)</option>
                         </select>
                     </div>
                     
@@ -143,8 +145,6 @@
                         <div class="progress-bar">
                             <div class="progress-fill" id="progressBar" style="width: 0%;"></div>
                         </div>
-                        <span class="percentage-text" id="percentageText">0%</span>
-                        <div class="time-info" id="timeInfo">00:00 / 00:00</div>
                     </div>
                 </div>
             </section>
@@ -162,6 +162,7 @@
         </div>
     </div>
 
+        <script src="{{ url_for('static', filename='emergency_alert.js') }}"></script>
         <script src="{{ url_for('static', filename='script_monitoring_simple.js') }}"></script>
 </body>
 </html>
