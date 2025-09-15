@@ -153,7 +153,7 @@ class EventsApp {
         // 更新物件類型過濾器
         const uniqueObjects = [...new Set(this.events.map(e => e.object))];
         
-        // 清除現有選項（保留"全部"）
+        // 清除現有選項
         while (this.objectFilter.children.length > 1) {
             this.objectFilter.removeChild(this.objectFilter.lastChild);
         }
@@ -194,7 +194,7 @@ class EventsApp {
             return;
         }
 
-        // 按時間排序（最新的在前）
+        // 按時間排序
         const sortedEvents = [...this.filteredEvents].sort((a, b) => {
             return new Date(b.time) - new Date(a.time);
         });
@@ -264,7 +264,6 @@ class EventsApp {
         
         this.toastContainer.appendChild(toast);
         
-        // Auto remove
         setTimeout(() => {
             toast.style.animation = 'slideOut 0.3s ease forwards';
             setTimeout(() => {
@@ -276,7 +275,6 @@ class EventsApp {
     }
 }
 
-// Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     window.eventsApp = new EventsApp();
 });

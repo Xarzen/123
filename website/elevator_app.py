@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from flask import Flask, render_template, jsonify, send_file, request, redirect, url_for, session, flash
 import os
 import cv2
@@ -13,7 +12,6 @@ from pymongo import MongoClient
 from bson import ObjectId
 from dotenv import load_dotenv
 import numpy as np
-# MediaPipe 導入（添加錯誤處理）
 import importlib
 MEDIAPIPE_AVAILABLE = False
 mp = None
@@ -25,7 +23,6 @@ try:
 except ImportError as e:
     print(f"MediaPipe 導入失敗: {e}")
     print("將使用基本的暈倒檢測方法（不包含姿態估計）")
-    # 創建假的 MediaPipe 類別作為回退
     class MockMediaPipe:
         class solutions:
             class pose:
@@ -36,7 +33,6 @@ except ImportError as e:
     mp = MockMediaPipe()
 import math
 
-# 載入 .env 檔案
 load_dotenv()
 
 # MongoDB 配置
@@ -56,7 +52,7 @@ try:
     mongo_client.admin.command('ping')
     print(f"MongoDB 連接成功! 資料庫: {MONGODB_DATABASE}")
     
-    # 初始化管理員帳號（如果不存在）
+    # 初始化管理員帳號
     admin_user = users_collection.find_one({'username': 'admin'})
     if not admin_user:
         admin_data = {
@@ -69,7 +65,7 @@ try:
         users_collection.insert_one(admin_data)
         print("已創建預設管理員帳號: admin/admin123")
     
-    # 初始化操作員帳號（如果不存在）
+    # 初始化操作員帳號
     operator_user = users_collection.find_one({'username': 'operator'})
     if not operator_user:
         operator_data = {
@@ -82,7 +78,7 @@ try:
         users_collection.insert_one(operator_data)
         print("已創建預設操作員帳號: operator/op123")
     
-    # 初始化觀察員帳號（如果不存在）
+    # 初始化觀察員帳號
     viewer_user = users_collection.find_one({'username': 'viewer'})
     if not viewer_user:
         viewer_data = {
@@ -104,7 +100,7 @@ except Exception as e:
     users_collection = None
 
 app = Flask(__name__)
-app.secret_key = 'elevator_monitoring_system_2025'  # 用於會話加密
+app.secret_key = 'elevator_monitoring_system_2025' 
 
 # 在請求前添加日誌
 @app.before_request
@@ -123,7 +119,6 @@ def log_request_info():
 def verify_password(username, password):
     """驗證用戶密碼"""
     if users_collection is None:
-        # 如果 MongoDB 不可用，使用備用驗證
         backup_users = {
             'admin': {
                 'password': hashlib.sha256('admin123'.encode()).hexdigest(),
@@ -160,7 +155,6 @@ def verify_password(username, password):
 def get_user_info(username):
     """獲取用戶資訊"""
     if users_collection is None:
-        # 備用用戶資料
         backup_users = {
             'admin': {'role': 'administrator', 'name': '系統管理員'},
             'operator': {'role': 'operator', 'name': '監控操作員'},
@@ -201,7 +195,6 @@ def get_events_from_db(limit=100):
     
     try:
         events = list(events_collection.find().sort('created_at', -1).limit(limit))
-        # 轉換 ObjectId 為字串
         for event in events:
             event['_id'] = str(event['_id'])
             if 'created_at' in event:
@@ -273,20 +266,13 @@ except Exception as e:
 try:
     import torch
     from tensorflow.keras.models import load_model
-    
-    # 載入EMT偵測模型
+
     emt_model = YOLO(EMT_MODEL_PATH)
-    
-    # 載入暈倒偵測模型（YOLO用於人體檢測）
     fall_model = YOLO(FALL_MODEL_PATH)
-    
-    # 載入滿員偵測模型（YOLO用於物體檢測）
     capacity_model = YOLO(CAPACITY_MODEL_PATH)
-    
-    # 載入姿態分類模型（TensorFlow用於姿態分類）
     fall_classifier = load_model(FALL_CLASSIFIER_PATH)
     
-    # 檢查並使用GPU（如果可用）
+    # 檢查並使用GPU
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     emt_model.to(device)
     fall_model.to(device)
@@ -319,7 +305,6 @@ print(f"暈倒偵測影片檔案: {FALL_VIDEO_PATH} - {'存在' if fall_video_ex
 print(f"滿員偵測(全滿)影片檔案: {CAPACITY_FULL_VIDEO_PATH} - {'存在' if capacity_full_video_exists else '不存在'}")
 print(f"滿員偵測(半滿)影片檔案: {CAPACITY_HALF_VIDEO_PATH} - {'存在' if capacity_half_video_exists else '不存在'}")
 
-# 至少要有一個影片檔案存在
 video_exists = emt_video_exists or fall_video_exists or capacity_full_video_exists or capacity_half_video_exists
 
 # ==================== 暈倒偵測相關函數 ==================== #
@@ -340,7 +325,7 @@ def classify_posture(shoulder, hip, knee, height_threshold=40):
     判斷姿勢：優先使用三點夾角，若 <160°再依據高度差判斷是坐著或躺下
     """
     hip_angle = calculate_joint_angle(shoulder, hip, knee)
-    height_diff = abs(shoulder[1] - hip[1])  # y 座標差（像素）
+    height_diff = abs(shoulder[1] - hip[1]) 
 
     if hip_angle < 150:
         if height_diff < height_threshold or hip_angle < 70:
@@ -350,7 +335,6 @@ def classify_posture(shoulder, hip, knee, height_threshold=40):
     else:
         return "Standing"
 
-# 新的暈倒偵測函數 (基於 ele.py)
 def resize_with_padding(img, size=(224,224)):
     """調整圖片大小並添加填充"""
     h, w = img.shape[:2]
@@ -373,7 +357,7 @@ def detect_people_for_fall(frame):
     persons = []
     for r in results:
         for box in r.boxes:
-            if int(box.cls[0]) == 0:  # 只保留人
+            if int(box.cls[0]) == 0: 
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
                 persons.append((x1, y1, x2, y2))
     return persons
@@ -386,7 +370,7 @@ def classify_posture_batch(rois, classifier_model, img_size=(224,224)):
     try:
         import numpy as np
         imgs = np.array([resize_with_padding(roi, img_size)/255.0 for roi in rois])
-        preds = classifier_model.predict(imgs, verbose=0)  # shape: (N,2)
+        preds = classifier_model.predict(imgs, verbose=0) 
         labels = []
         is_lying_list = []
         
@@ -426,10 +410,10 @@ def check_emergency_status(postures):
     """檢查緊急狀態（暈倒偵測）"""
     for p in postures:
         if p == "Lying Down":
-            return 2  # 高風險
+            return 2 
         elif p == "Sitting":
-            return 1  # 中風險
-    return 0  # 無風險
+            return 1  
+    return 0  
 
 # ==================== 結束暈倒偵測函數 ==================== #
 
@@ -440,19 +424,16 @@ def calculate_union_area(boxes, height, width):
     if len(boxes) == 0:
         return 0
     
-    # 創建一個與圖片相同大小的空白圖像
     union_mask = np.zeros((height, width), dtype=np.uint8)
     
-    # 遍歷每個框框，將其區域標記為1
     for box in boxes:
-        x1, y1, x2, y2 = map(int, box[:4])  # 只取前4個座標值
-        # 確保座標在合理範圍內
+        x1, y1, x2, y2 = map(int, box[:4]) 
         x1, y1 = max(0, x1), max(0, y1)
         x2, y2 = min(width, x2), min(height, y2)
-        if x2 > x1 and y2 > y1:  # 確保是有效的框
+        if x2 > x1 and y2 > y1:  
             union_mask[y1:y2, x1:x2] = 1
     
-    # 計算聯集面積（所有被標記為1的區域）
+    # 計算聯集面積
     union_area = np.sum(union_mask)
     return union_area
 
@@ -462,7 +443,7 @@ def detect_capacity_status(frame, model, threshold=0.5):
     返回: (area_ratio, is_full, detection_count)
     """
     try:
-        # 進行YOLO偵測 (只偵測人 - class 0)
+        # 進行YOLO偵測
         results = model(frame, device=device, verbose=False)
         
         if results and len(results) > 0 and results[0].boxes is not None:
@@ -470,10 +451,10 @@ def detect_capacity_status(frame, model, threshold=0.5):
             confidences = results[0].boxes.conf.cpu().numpy()
             classes = results[0].boxes.cls.cpu().numpy()
             
-            # 只保留人的偵測結果 (class 0) 且信心度 > 0.3
+            # 只保留人的偵測結果 
             person_boxes = []
             for i, (box, conf, cls) in enumerate(zip(boxes, confidences, classes)):
-                if cls == 0 and conf > 0.3:  # class 0 是人
+                if cls == 0 and conf > 0.3:
                     person_boxes.append(box)
             
             height, width = frame.shape[:2]
@@ -506,7 +487,7 @@ def draw_capacity_detection(frame, area_ratio, is_full, person_count, boxes, det
         x1, y1, x2, y2 = map(int, box[:4])
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
     
-    # 顯示狀態資訊（使用英文避免編碼問題）
+    # 顯示狀態資訊
     if detection_type == 'capacity_full':
         title = "Capacity Detection (Full)"
     else:
@@ -519,7 +500,7 @@ def draw_capacity_detection(frame, area_ratio, is_full, person_count, boxes, det
     cv2.rectangle(overlay, (10, 10), (width-10, 120), (0, 0, 0), -1)
     frame = cv2.addWeighted(frame, 0.7, overlay, 0.3, 0)
     
-    # 文字資訊（使用英文避免編碼問題）
+    # 文字資訊
     cv2.putText(frame, title, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
     cv2.putText(frame, f"Person Count: {person_count}", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
     cv2.putText(frame, f"Area Ratio: {area_ratio:.1%}", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
@@ -537,19 +518,19 @@ class VideoProcessor:
         self.processed = False
         self.output_path = None
         self.error_message = None
-        self.events = []  # 儲存事件記錄
-        self.last_record_time = {}  # 記錄每個物件最後一次記錄的時間戳
-        self.record_interval = 3.0  # 記錄間隔（秒）
-        self.current_floor = '1F'  # 當前樓層，默認為1F
-        self.detection_type = detection_type  # 偵測類型：'emt', 'fall', 'capacity_full', 'capacity_half'
+        self.events = []  
+        self.last_record_time = {}  
+        self.record_interval = 3.0  
+        self.current_floor = '1F'  
+        self.detection_type = detection_type 
         
         # 實時播放參數
-        self.realtime_mode = True  # 實時播放模式
-        self.original_fps = 30  # 原始影片FPS
+        self.realtime_mode = True  
+        self.original_fps = 30  
         self.current_frame_num = 0
         self.start_time = None
         self.paused = False
-        self.is_processing = False  # 實時處理狀態
+        self.is_processing = False  
         
         # 性能資訊
         self.performance_info = {}
@@ -574,7 +555,7 @@ class VideoProcessor:
                 video_path = CAPACITY_HALF_VIDEO_PATH
                 if not capacity_half_video_exists:
                     raise Exception("滿員偵測(半滿)影片檔案不存在")
-            else:  # default to emt
+            else: 
                 video_path = EMT_VIDEO_PATH
                 if not emt_video_exists:
                     raise Exception("EMT偵測影片檔案不存在")
@@ -586,7 +567,6 @@ class VideoProcessor:
             self.frame_count = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
             self.original_fps = self.cap.get(cv2.CAP_PROP_FPS)
             
-            # 計算視頻總時長
             video_duration = self.frame_count / self.original_fps if self.original_fps > 0 else 0
             
             print(f"影片參數 ({self.detection_type}):")
@@ -608,7 +588,7 @@ class VideoProcessor:
                 print("錯誤：影片捕獲器未初始化")
                 return None
                 
-            # 計算應該顯示的幀數（基於實際經過的時間）
+            # 計算應該顯示的幀數
             if self.start_time is None:
                 self.start_time = time.time()
                 target_frame = 0
@@ -619,16 +599,12 @@ class VideoProcessor:
             
             print(f"經過時間: {time.time() - self.start_time:.2f}s, 目標幀: {target_frame}, 當前幀: {self.current_frame_num}, 總幀數: {self.frame_count}, FPS: {self.original_fps}")
             
-            # 如果目標幀沒有變化且已有當前幀，返回當前幀
             if target_frame == self.current_frame_num and self.current_frame is not None:
                 print("目標幀未改變，返回當前幀")
-                # 更新進度
                 self.progress = (self.current_frame_num / self.frame_count) * 100
                 return self.current_frame
             
-            # 跳到目標幀
             if target_frame >= self.frame_count:
-                # 播放完成
                 print("播放完成：目標幀超過總幀數")
                 self.progress = 100
                 self.is_processing = False
@@ -646,7 +622,6 @@ class VideoProcessor:
                 print(f"讀取結果: ret={ret}, frame shape={frame.shape if frame is not None else 'None'}")
                 
                 if not ret:
-                    # 播放完成
                     print("播放完成：無法讀取幀")
                     self.progress = 100
                     self.is_processing = False
@@ -668,7 +643,6 @@ class VideoProcessor:
                 # 計算進度
                 self.progress = int((self.current_frame_num / self.frame_count) * 100)
                 
-                # 編碼為base64
                 _, buffer = cv2.imencode('.jpg', frame)
                 self.current_frame = base64.b64encode(buffer).decode('utf-8')
                 
@@ -715,9 +689,9 @@ class VideoProcessor:
                                     'frame_number': self.current_frame_num,
                                     'video_timestamp': current_time
                                 }
-                                # 儲存到記憶體（用於即時顯示）
+                                # 儲存到記憶體
                                 self.events.append(event)
-                                # 儲存到資料庫（用於持久化）
+                                # 儲存到資料庫
                                 save_event_to_db(event.copy())
                                 print(f"*** [EMT偵測] 新增事件記錄: {unified_label} (信心度: {conf:.2f}) 樓層: {event['floor']} 在時間 {event['time']} ***")
                             
@@ -776,10 +750,10 @@ class VideoProcessor:
                         cv2.putText(frame, "⚠️ EMERGENCY DETECTED!", (10, 60), 
                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
                         
-                        # 檢查是否需要記錄新事件（防止重複記錄）
+                        # 檢查是否需要記錄新事件
                         should_record = False
-                        event_key = "[緊急狀況]"  # 使用統一的key
-                        real_time = time.time()  # 使用實際時間戳
+                        event_key = "[緊急狀況]" 
+                        real_time = time.time()  
                         
                         if not hasattr(self, 'last_record_time'):
                             self.last_record_time = {}
@@ -787,12 +761,12 @@ class VideoProcessor:
                         if event_key not in self.last_record_time:
                             should_record = True
                             self.last_record_time[event_key] = real_time
-                        elif real_time - self.last_record_time[event_key] >= 3.0:  # 3秒間隔，與EMT一致
+                        elif real_time - self.last_record_time[event_key] >= 3.0: 
                             should_record = True
                             self.last_record_time[event_key] = real_time
                         
                         if should_record:
-                            # 記錄緊急狀況事件（簡化版）
+                            # 記錄緊急狀況事件
                             event_data = {
                                 'type': 'emergency_fall',
                                 'timestamp': datetime.now().isoformat(),
@@ -840,11 +814,11 @@ class VideoProcessor:
             return frame
         
         try:
-            # 設定滿員閾值（根據偵測類型調整）
+            # 設定滿員閾值
             if self.detection_type == 'capacity_full':
-                threshold = 0.4  # 全滿情境40%就算滿員
-            else:  # capacity_half
-                threshold = 0.4  # 半滿情境40%就算滿員
+                threshold = 0.4  
+            else: 
+                threshold = 0.4  
             
             # 執行滿員偵測
             area_ratio, is_full, person_count, boxes = detect_capacity_status(frame, capacity_model, threshold)
@@ -852,7 +826,7 @@ class VideoProcessor:
             # 繪製偵測結果
             frame = draw_capacity_detection(frame, area_ratio, is_full, person_count, boxes, self.detection_type)
             
-            # 記錄滿員事件（只在控制台輸出，不記錄到資料庫）
+            # 記錄滿員事件
             if is_full:
                 real_time = time.time()
                 event_key = f"[滿員狀況_{self.detection_type}]"
@@ -864,14 +838,13 @@ class VideoProcessor:
                 if event_key not in self.last_record_time:
                     should_record = True
                     self.last_record_time[event_key] = real_time
-                elif real_time - self.last_record_time[event_key] >= 3.0:  # 3秒間隔
+                elif real_time - self.last_record_time[event_key] >= 3.0: 
                     should_record = True
                     self.last_record_time[event_key] = real_time
                 
                 if should_record:
                     current_time = self.current_frame_num / self.original_fps
                     
-                    # 只在控制台輸出警報訊息，不儲存到資料庫或事件列表
                     print(f"*** [滿員警報] {event_key} 樓層: {getattr(self, 'current_floor', '1F')} 在時間 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 面積比例: {area_ratio:.1%} 人員數量: {person_count}人 ***")
                        
         except Exception as e:
@@ -896,8 +869,7 @@ class VideoProcessor:
             self.current_frame_num = 0
             self.start_time = None
             self.current_frame = None
-            # self.events = []  # 註解掉重置事件記錄，讓事件可以累積保留
-            self.last_record_time = {}  # 重置記錄時間
+            self.last_record_time = {}
             
             print(f"狀態重置完成 - progress: {self.progress}, is_processing: {self.is_processing}, current_frame_num: {self.current_frame_num}")
             
@@ -912,7 +884,7 @@ class VideoProcessor:
             print(f"開始實時分析影片: {self.frame_count} 幀, FPS: {self.original_fps}")
             
             self.is_processing = True
-            self.start_time = None  # 將在第一次調用get_current_frame_with_detection時設置
+            self.start_time = None
             self.current_frame_num = 0
             
             print(f"監控啟動完成 - is_processing: {self.is_processing}")
@@ -950,9 +922,7 @@ class VideoProcessor:
         self.progress = 0
         self.processed = False
         self.error_message = None
-        # 不再清空事件記錄，讓記錄可以累積
-        # self.events = []  # 註解掉清空事件記錄
-        self.last_record_time = {}  # 重設記錄時間（每次重新開始間隔控制）
+        self.last_record_time = {} 
         
         try:
             # 根據偵測類型選擇影片檔案
@@ -980,8 +950,8 @@ class VideoProcessor:
             frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             fps = cap.get(cv2.CAP_PROP_FPS)
             
-            # 準備輸出影片（使用更好的編碼器和目標FPS）
-            fourcc = cv2.VideoWriter_fourcc(*'H264')  # 使用H264編碼器
+            # 準備輸出影片
+            fourcc = cv2.VideoWriter_fourcc(*'H264') 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_filename = f'processed_{timestamp}.mp4'
             self.output_path = os.path.join(OUTPUT_FOLDER, output_filename)
@@ -989,7 +959,6 @@ class VideoProcessor:
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             
-            # 使用目標FPS而不是原始FPS
             out = cv2.VideoWriter(self.output_path, fourcc, self.target_fps, (width, height))
             
             frame_num = 0
@@ -1013,14 +982,12 @@ class VideoProcessor:
                 frame_num += 1
                 self.progress = int((frame_num / frame_count) * 100)
                 
-                # 跳幀處理：只處理特定幀
+                # 跳幀處理
                 if frame_num % (self.frame_skip + 1) != 0:
                     continue
                 
-                # 添加到批量處理
                 batch_frames.append((frame.copy(), frame_num, fps))
                 
-                # 當批量達到指定大小時進行處理
                 if len(batch_frames) >= self.batch_size:
                     current_model = fall_model if self.detection_type == 'fall' else emt_model
                     if current_model:
@@ -1051,7 +1018,6 @@ class VideoProcessor:
     def _process_batch(self, batch_frames, fps, out):
         """批量處理幀數據"""
         try:
-            # 準備批量輸入
             frames_only = [frame for frame, _, _ in batch_frames]
             
             # 批量YOLO檢測 - 根據偵測類型使用不同模型
@@ -1068,11 +1034,11 @@ class VideoProcessor:
                 results = results_batch[i]
                 
                 # 處理檢測結果
-                for result in [results]:  # results_batch[i] 已經是單個結果
+                for result in [results]: 
                     if hasattr(result, 'boxes') and result.boxes is not None:
                         for box in result.boxes:
                             conf = box.conf[0].item()
-                            if conf >= 0.6:  # 信心度閾值
+                            if conf >= 0.6: 
                                 x1, y1, x2, y2 = map(int, box.xyxy[0])
                                 label = result.names[int(box.cls[0])]
                                 
@@ -1092,13 +1058,13 @@ class VideoProcessor:
                                         'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                                         'object': unified_label,
                                         'confidence': f"{conf:.2f}",
-                                        'floor': getattr(self, 'current_floor', '1F'),  # 添加樓層信息
+                                        'floor': getattr(self, 'current_floor', '1F'), 
                                         'frame_number': frame_num,
                                         'video_timestamp': current_time
                                     }
-                                    # 儲存到記憶體（用於即時顯示）
+                                    # 儲存到記憶體
                                     self.events.append(event)
-                                    # 儲存到資料庫（用於持久化）
+                                    # 儲存到資料庫
                                     save_event_to_db(event.copy())
                                 
                                 # 在影片上繪製
@@ -1109,7 +1075,7 @@ class VideoProcessor:
                 # 寫入處理後的幀
                 out.write(frame)
                 
-                # 更新當前幀（用於即時預覽）
+                # 更新當前幀
                 _, buffer = cv2.imencode('.jpg', frame)
                 self.current_frame = base64.b64encode(buffer).decode('utf-8')
         
@@ -1119,19 +1085,18 @@ class VideoProcessor:
     def set_performance_mode(self, mode='balanced'):
         """設定性能模式"""
         if mode == 'fast':
-            self.frame_skip = 4  # 跳過更多幀
-            self.batch_size = 8  # 更大批量
-            self.target_fps = 10  # 更低FPS
+            self.frame_skip = 4 
+            self.batch_size = 8  
+            self.target_fps = 10
         elif mode == 'quality':
-            self.frame_skip = 1  # 跳過較少幀
-            self.batch_size = 2  # 較小批量
-            self.target_fps = 20  # 更高FPS
-        else:  # balanced
-            self.frame_skip = 2  # 預設
-            self.batch_size = 4  # 預設
-            self.target_fps = 15  # 預設
+            self.frame_skip = 1  
+            self.batch_size = 2 
+            self.target_fps = 20  
+        else: 
+            self.frame_skip = 2  
+            self.batch_size = 4 
+            self.target_fps = 15 
 
-# 全域視頻處理器
 video_processor = VideoProcessor()
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -1222,8 +1187,8 @@ def start_realtime():
         return jsonify({'error': '您沒有權限執行監控操作'}), 403
 
     # 獲取樓層信息和偵測類型
-    floor_data = '1F'  # 默認樓層
-    detection_type = 'emt'  # 默認偵測類型
+    floor_data = '1F'  
+    detection_type = 'emt'  
     try:
         if request.is_json:
             data = request.get_json()
@@ -1315,17 +1280,13 @@ def get_realtime_frame():
     # 檢查最近的事件是否有緊急狀況
     if len(video_processor.events) > 0:
         latest_event = video_processor.events[-1]
-        # 檢查最新事件是否為緊急狀況且在最近5秒內
         current_time = datetime.now()
         if isinstance(latest_event.get('timestamp'), str):
             try:
-                # 嘗試解析 ISO 格式
                 timestamp_str = latest_event['timestamp']
                 if 'T' in timestamp_str:
-                    # ISO 格式：2025-09-05T16:41:48.075388
                     event_time = datetime.fromisoformat(timestamp_str.replace('T', ' ').split('.')[0])
                 else:
-                    # 標準格式：2025-09-05 16:41:48
                     event_time = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
             except:
                 event_time = current_time
@@ -1368,17 +1329,13 @@ def check_emergency():
         
         if len(video_processor.events) > 0:
             latest_event = video_processor.events[-1]
-            # 檢查最新事件是否為緊急狀況且在最近5秒內
             current_time = datetime.now()
             if isinstance(latest_event.get('timestamp'), str):
                 try:
-                    # 嘗試解析 ISO 格式
                     timestamp_str = latest_event['timestamp']
                     if 'T' in timestamp_str:
-                        # ISO 格式：2025-09-05T16:41:48.075388
                         event_time = datetime.fromisoformat(timestamp_str.replace('T', ' ').split('.')[0])
                     else:
-                        # 標準格式：2025-09-05 16:41:48
                         event_time = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
                 except:
                     event_time = current_time
@@ -1435,7 +1392,7 @@ def get_results():
     if not video_processor.processed:
         return jsonify({'error': '影片尚未處理完成'}), 400
     
-    # 只返回事件統計資訊
+    # 返回事件統計資訊
     return jsonify({
         'total_events': len(video_processor.events),
         'filename': 'emtvideo.mp4',
@@ -1446,7 +1403,7 @@ def get_results():
 @login_required
 def get_events_data():
     # 取得查詢參數
-    source = request.args.get('source', 'memory')  # 'memory' 或 'database'
+    source = request.args.get('source', 'memory') 
     limit = int(request.args.get('limit', 100))
     
     if source == 'database':
@@ -1458,7 +1415,7 @@ def get_events_data():
             'source': 'database'
         })
     else:
-        # 從記憶體獲取事件（當前會話）
+        # 從記憶體獲取事件
         return jsonify({
             'events': video_processor.events,
             'total_events': len(video_processor.events),
@@ -1481,7 +1438,6 @@ def reset_processing():
         video_processor.progress = 0
         video_processor.current_frame = None
         video_processor.error_message = None
-        # 不清除事件記錄，讓管理員可以選擇是否保留歷史記錄
         return jsonify({'success': True, 'message': '已重設處理狀態'})
     else:
         return jsonify({'error': '正在處理中，無法重設'}), 400
@@ -1497,10 +1453,7 @@ def clear_events():
     })
 
 if __name__ == '__main__':
-    # 確保必要的目錄存在
     os.makedirs(OUTPUT_FOLDER, exist_ok=True)
-    
-    # 從環境變數讀取配置，如果沒有則使用預設值
     host = os.environ.get('FLASK_HOST', '0.0.0.0')
     port = int(os.environ.get('FLASK_PORT', 5000))
     

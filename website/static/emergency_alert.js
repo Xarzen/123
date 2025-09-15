@@ -1,26 +1,20 @@
-/**
- * 緊急警報系統
- * 包含警報聲、瀏覽器通知和語音播報功能
- */
-
 class EmergencyAlertSystem {
     constructor() {
         this.isAlertActive = false;
         this.alertAudio = null;
         this.voiceSynthesis = window.speechSynthesis;
         this.lastAlertTime = 0;
-        this.alertCooldown = 5000; // 5秒冷卻時間，避免重複警報
+        this.alertCooldown = 5000; 
         
         this.initializeAudio();
         this.requestNotificationPermission();
     }
 
     /**
-     * 初始化警報音效
+     * 初始化警報音
      */
     initializeAudio() {
         try {
-            // 創建警報音效 - 使用音頻上下文生成警報聲
             this.alertAudio = this.createAlertSound();
         } catch (error) {
             console.error('初始化警報音效失敗:', error);
@@ -28,7 +22,7 @@ class EmergencyAlertSystem {
     }
 
     /**
-     * 創建警報聲音
+     * 創建警報聲
      */
     createAlertSound() {
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -58,7 +52,7 @@ class EmergencyAlertSystem {
         return {
             play: async () => {
                 try {
-                    // 警報音效模式：高低交替的緊急警報聲
+                    // 警報音效：高低交替警報聲
                     for (let i = 0; i < 6; i++) {
                         await createBeep(800, 0.3, 0.5); // 高音
                         await new Promise(resolve => setTimeout(resolve, 100));
@@ -91,12 +85,12 @@ class EmergencyAlertSystem {
     showNotification(title, message, options = {}) {
         if ('Notification' in window && Notification.permission === 'granted') {
             const defaultOptions = {
-                icon: '/static/emergency-icon.png', // 您可以添加緊急圖標
+                icon: '/static/emergency-icon.png', 
                 badge: '/static/emergency-badge.png',
-                requireInteraction: true, // 需要用戶交互才能關閉
-                tag: 'emergency-alert', // 防止重複通知
+                requireInteraction: true, 
+                tag: 'emergency-alert', 
                 renotify: true,
-                vibrate: [200, 100, 200, 100, 200], // 震動模式（如果支援）
+                vibrate: [200, 100, 200, 100, 200], 
                 ...options
             };
 
@@ -105,10 +99,9 @@ class EmergencyAlertSystem {
                 ...defaultOptions
             });
 
-            // 自動關閉通知
             setTimeout(() => {
                 notification.close();
-            }, 10000); // 10秒後自動關閉
+            }, 10000); 
 
             return notification;
         } else {
@@ -122,18 +115,16 @@ class EmergencyAlertSystem {
      */
     speakAlert(message) {
         if (this.voiceSynthesis) {
-            // 停止當前語音
             this.voiceSynthesis.cancel();
 
             const utterance = new SpeechSynthesisUtterance(message);
             
             // 設置語音參數
-            utterance.lang = 'zh-TW'; // 繁體中文
-            utterance.rate = 1.0;     // 語速
-            utterance.pitch = 1.2;    // 音調
-            utterance.volume = 1.0;   // 音量
+            utterance.lang = 'zh-TW'; 
+            utterance.rate = 1.0;     
+            utterance.pitch = 1.2;    
+            utterance.volume = 1.0;   
 
-            // 選擇中文語音（如果可用）
             const voices = this.voiceSynthesis.getVoices();
             const chineseVoice = voices.find(voice => 
                 voice.lang.includes('zh') || voice.lang.includes('zh-TW') || voice.lang.includes('zh-CN')
@@ -162,12 +153,11 @@ class EmergencyAlertSystem {
     }
 
     /**
-     * 觸發完整的緊急警報
+     * 觸發完整緊急
      */
     triggerEmergencyAlert(emergencyInfo) {
         const now = Date.now();
         
-        // 檢查冷卻時間，避免重複警報
         if (now - this.lastAlertTime < this.alertCooldown) {
             console.log('警報冷卻中，跳過此次警報');
             return;
@@ -178,14 +168,14 @@ class EmergencyAlertSystem {
 
         console.log('觸發緊急警報:', emergencyInfo);
 
-        // 1. 播放警報聲
+        // 播放警報聲
         if (this.alertAudio) {
             this.alertAudio.play().catch(error => {
                 console.error('播放警報聲失敗:', error);
             });
         }
 
-        // 2. 顯示瀏覽器通知
+        // 顯示瀏覽器通知
         const notificationTitle = '🚨 緊急警報 🚨';
         const notificationMessage = `${emergencyInfo.floor} 發生緊急狀況，請立即處理！`;
         
@@ -193,16 +183,16 @@ class EmergencyAlertSystem {
             urgency: 'critical'
         });
 
-        // 3. 語音播報
+        // 語音播報
         const voiceMessage = '發生緊急狀況 請及時處理';
         setTimeout(() => {
             this.speakAlert(voiceMessage);
-        }, 500); // 延遲500ms確保警報聲先播放
+        }, 500); 
 
-        // 4. 顯示頁面警報
+        // 顯示頁面警報
         this.showPageAlert(emergencyInfo);
 
-        // 5. 設置警報結束
+        // 設置警報結束
         setTimeout(() => {
             this.isAlertActive = false;
         }, 5000);
@@ -333,7 +323,7 @@ class EmergencyAlertSystem {
             if (alertOverlay.parentNode) {
                 alertOverlay.remove();
             }
-        }, 15000); // 15秒後自動關閉
+        }, 15000); 
     }
 
     /**

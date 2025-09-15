@@ -53,10 +53,8 @@ class LoginManager {
             });
             
             if (response.redirected) {
-                // 登入成功，重定向到首頁
                 window.location.href = response.url;
             } else {
-                // 登入失敗，重新載入頁面顯示錯誤訊息
                 window.location.reload();
             }
         } catch (error) {
@@ -97,7 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
     new LoginManager();
 });
 
-// 添加一些視覺效果
+// 視覺效果
 document.addEventListener('DOMContentLoaded', () => {
     const inputs = document.querySelectorAll('input');
     inputs.forEach(input => {

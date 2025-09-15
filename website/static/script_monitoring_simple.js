@@ -74,7 +74,7 @@ function startRealtimeMonitoring() {
             isUpdating = true;
             updateRealtimeFrame();
             
-            // 啟動緊急狀況檢測（僅限暈倒偵測）
+            // 啟動緊急狀況檢測
             if (selectedDetectionType === 'fall') {
                 startEmergencyMonitoring();
             }
@@ -187,7 +187,7 @@ function updateRealtimeFrame() {
                 const video = document.getElementById('realtime-video');
                 if (video && data.frame_data) {
                     video.src = 'data:image/jpeg;base64,' + data.frame_data;
-                    video.style.display = 'block'; // 確保影片顯示
+                    video.style.display = 'block';
                     
                     // 隱藏載入提示
                     const loading = document.getElementById('realtimeLoading');
@@ -216,18 +216,16 @@ function updateRealtimeFrame() {
                         showToast('success', '監控完成', '實時視頻監控已完成');
                     }, 500);
                 } else if (isUpdating) {
-                    // 繼續更新
-                    updateTimeout = setTimeout(updateRealtimeFrame, 100); // 10 FPS，更穩定
+                    updateTimeout = setTimeout(updateRealtimeFrame, 100); 
                 }
             } else {
                 console.log('獲取幀失敗：', data.message);
                 if (data.message && data.message.includes('實時監控未啟動')) {
-                    // 如果後端說監控未啟動，停止前端輪詢
                     console.log('後端監控未啟動，停止前端輪詢');
                     isUpdating = false;
                     stopRealtimeMonitoring();
                 } else if (isUpdating) {
-                    updateTimeout = setTimeout(updateRealtimeFrame, 1000); // 錯誤時延遲重試
+                    updateTimeout = setTimeout(updateRealtimeFrame, 1000); 
                 }
             }
         })
@@ -243,16 +241,13 @@ function updateRealtimeFrame() {
 document.addEventListener('DOMContentLoaded', function() {
     console.log('頁面加載完成，監控系統就緒');
     
-    // 先停止任何正在運行的監控
     fetch('/stop_realtime', {
         method: 'POST'
     }).then(() => {
         console.log('已停止之前的監控會話');
-        // 重置 UI 狀態
         resetUI();
     }).catch(() => {
         console.log('沒有需要停止的監控會話');
-        // 重置 UI 狀態
         resetUI();
     });
     
@@ -281,7 +276,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const selectedType = this.value;
             console.log('偵測類型已更改為：', selectedType);
             
-            // 可以在這裡添加切換偵測類型時的UI更新邏輯
             showToast('info', '偵測類型', 
                 selectedType === 'emt' ? '已切換到EMT緊急醫療偵測' : '已切換到暈倒偵測');
         });
@@ -291,7 +285,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Toast 通知功能
+// 通知功能
 function showToast(type, title, message) {
     console.log(`${type.toUpperCase()}: ${title} - ${message}`);
     
@@ -364,7 +358,6 @@ function checkEmergencyStatus() {
         });
 }
 
-// 在實時幀更新中也檢查緊急狀況
 function checkFrameEmergency(data) {
     if (data.emergency_detected && data.emergency_info) {
         console.log('從實時幀中檢測到緊急狀況:', data.emergency_info);
